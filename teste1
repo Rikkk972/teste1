@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Aim Trainer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', system-ui, sans-serif; }
+  body {
+    background: radial-gradient(circle at 50% 50%, #141826 0%, #07090f 100%);
+    height: 100vh; overflow: hidden; color: #e6e9f0; cursor: crosshair;
+  }
+
+  /* ====== HUD de estatísticas ====== */
+  .hud {
+    position: fixed; top: 24px; left: 24px;
+    display: flex; gap: 14px; z-index: 10;
+    pointer-events: none;
+  }
+  .stat {
+    padding: 14px 20px;
+    background: rgba(20,24,40,0.8);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(120,140,255,0.15);
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    min-width: 110px;
+  }
+  .stat-label { font-size: 10px; color: #8b93a7; letter-spacing: 1.2px; text-transform: uppercase; }
+  .stat-value { font-size: 22px; font-weight: 700; color: #4f8cff; margin-top: 4px; }
+
+  /* ====== Alvo ====== */
+  .target {
+    position: absolute;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #6f8cff, #2a3a8f);
+    box-shadow: 0 0 25px rgba(79,140,255,0.7), inset 0 0 15px rgba(255,255,255,0.2);
+    cursor: pointer;
+    animation: pop .18s cubic-bezier(.4,0,.2,1);
+    transition: transform .08s;
+  }
+  .target:hover { transform: scale(1.08); }
+  @keyframes pop {
+    from { transform: scale(0); opacity: 0; }
+    to   { transform: scale(1); opacity: 1; }
+  }
+
+  /* ====== Popup de acerto ====== */
+  .hit-popup {
+    position: absolute; pointer-events: none;
+    font-weight: 700; font-size: 18px; color: #4fffb0;
+    text-shadow: 0 0 12px rgba(79,255,176,0.8);
+    animation: floatUp .6s ease-out forwards;
+  }
+  @keyframes floatUp {
+    from { opacity: 1; transform: translateY(0); }
+    to   { opacity: 0; transform: translateY(-40px); }
+  }
+
+  /* ====== Painel de controle ====== */
+  .panel {
+    position: fixed; top: 24px; right: 24px; z-index: 10;
+    width: 260px; padding: 20px;
+    background: rgba(20,24,40,0.85);
+    backdrop-filter: blur(14px);
+    border: 1px solid rgba(120,140,255,0.15);
+    border-radius: 16px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  }
+  .panel h3 {
+    font-size: 13px; letter-spacing: 1px; margin-bottom: 16px;
+    color: #c8cfe0; text-transform: uppercase;
+  }
+  .row { margin-bottom: 14px; }
+  .label { font-size: 11px; color: #8b93a7; margin-bottom: 6px; display: block; letter-spacing: .8px; }
+
+  .textbox {
+    width: 100%; padding: 10px 12px;
+    background: rgba(10,14,26,0.7);
+    border: 1px solid rgba(120,140,255,0.15);
+    border-radius: 8px; color: #e6e9f0; font-size: 13px; outline: none;
+    transition: all .2s;
+  }
+  .textbox:focus { border-color: #4f8cff; box-shadow: 0 0 0 3px rgba(79,140,255,0.15); }
+
+  .btn {
+    width: 100%; padding: 11px;
+    background: linear-gradient(135deg, #4f8cff, #6f5bff);
+    border: none; border-radius: 10px;
+    color: #fff; font-size: 13px; font-weight: 600;
+    letter-spacing: 1px; cursor: pointer;
+    transition: all .2s;
+    box-shadow: 0 4px 16px rgba(79,140,255,0.35);
+  }
+  .btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(79,140,255,0.5); }
+  .btn:active { transform: translateY(0); }
+  .btn.secondary {
+    background: rgba(30,35,60,0.9); border: 1px solid rgba(120,140,255,0.2);
+    box-shadow: none; margin-top: 8px;
+  }
+  .btn.secondary:hover { border-color: #4f8cff; }
+</style>
+</head>
+<body>
+
+  <!-- HUD -->
+  <div class="hud">
+    <div class="stat"><div class="stat-label">Score</div><div class="stat-value" id="score">0</div></div>
+    <div class="stat"><div class="stat-label">Precisão</div><div class="stat-value" id="acc">100%</div></div>
+    <div class="stat"><div class="stat-label">Reação</div><div class="stat-value" id="react">--</div></div>
+  </div>
+
+  <!-- Painel -->
+  <div class="panel">
+    <h3>⚙ Configurações</h3>
+    <div class="row">
+      <label class="label">TAMANHO DO ALVO (PX)</label>
+      <input type="text" class="textbox" id="sizeInput" value="50">
+    </div>
+    <div class="row">
+      <label class="label">VELOCIDADE (MS)</label>
+      <input type="text" class="textbox" id="speedInput" value="800">
+    </div>
+    <button class="btn" id="startBtn">INICIAR TREINO</button>
+    <button class="btn secondary" id="resetBtn">RESETAR</button>
+  </div>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ====== Estado ====== */
+  const state = {
+    running: false,
+    score: 0,
+    hits: 0,
+    misses: 0,
+    targetSize: 50,
+    speedMs: 800,
+    currentTarget: null,
+    spawnTime: 0,
+    spawnTimeout: null,
+    reactionTimes: [],
+  };
+
+  /* ====== DOM ====== */
+  const scoreEl  = document.getElementById('score');
+  const accEl    = document.getElementById('acc');
+  const reactEl  = document.getElementById('react');
+  const sizeIn   = document.getElementById('sizeInput');
+  const speedIn  = document.getElementById('speedInput');
+  const startBtn = document.getElementById('startBtn');
+  const resetBtn = document.getElementById('resetBtn');
+
+  /* ====== Util ====== */
+  const rand = (min, max) => Math.random() * (max - min) + min;
+
+  /* ====== Atualiza HUD ====== */
+  function updateHUD() {
+    scoreEl.textContent = state.score;
+
+    const total = state.hits + state.misses;
+    accEl.textContent = total === 0
+      ? '100%'
+      : Math.round((state.hits / total) * 100) + '%';
+
+    if (state.reactionTimes.length) {
+      const avg = state.reactionTimes.reduce((a,b) => a+b, 0) / state.reactionTimes.length;
+      reactEl.textContent = Math.round(avg) + 'ms';
+    } else {
+      reactEl.textContent = '--';
+    }
+  }
+
+  /* ====== Cria um alvo ====== */
+  function spawnTarget() {
+    if (!state.running) return;
+    removeTarget();
+
+    const size = state.targetSize;
+    const x = rand(size, window.innerWidth  - size * 2);
+    const y = rand(size, window.innerHeight - size * 2);
+
+    const el = document.createElement('div');
+    el.className = 'target';
+    el.style.cssText = `
+      left: ${x}px; top: ${y}px;
+      width: ${size}px; height: ${size}px;
+    `;
+
+    el.addEventListener('click', onHit);
+    document.body.appendChild(el);
+
+    state.currentTarget = el;
+    state.spawnTime = performance.now();
+
+    // Se o alvo expirar sem ser clicado → conta como miss
+    state.spawnTimeout = setTimeout(() => {
+      if (!state.running || state.currentTarget !== el) return;
+      state.misses++;
+      updateHUD();
+      removeTarget();
+      spawnTarget();
+    }, state.speedMs);
+  }
+
+  /* ====== Remove o alvo atual ====== */
+  function removeTarget() {
+    clearTimeout(state.spawnTimeout);
+    if (state.currentTarget) {
+      state.currentTarget.remove();
+      state.currentTarget = null;
+    }
+  }
+
+  /* ====== Acerto ====== */
+  function onHit(e) {
+    e.stopPropagation();
+    if (!state.running || !state.currentTarget) return;
+
+    const reaction = performance.now() - state.spawnTime;
+    state.hits++;
+    state.score += 10;
+    state.reactionTimes.push(reaction);
+
+    showPopup(e.clientX, e.clientY, `+10`);
+    updateHUD();
+
+    removeTarget();
+    // Próximo alvo com pequeno delay pra ficar fluido
+    setTimeout(spawnTarget, 80);
+  }
+
+  /* ====== Miss (clique fora) ====== */
+  document.addEventListener('click', (e) => {
+    if (!state.running) return;
+    if (e.target.classList.contains('target')) return;
+    state.misses++;
+    state.score = Math.max(0, state.score - 3);
+    updateHUD();
+  });
+
+  /* ====== Popup visual ====== */
+  function showPopup(x, y, text) {
+    const pop = document.createElement('div');
+    pop.className = 'hit-popup';
+    pop.textContent = text;
+    pop.style.left = x + 'px';
+    pop.style.top  = y + 'px';
+    document.body.appendChild(pop);
+    setTimeout(() => pop.remove(), 600);
+  }
+
+  /* ====== Valida inputs ====== */
+  function readInputs() {
+    const size  = parseInt(sizeIn.value, 10);
+    const speed = parseInt(speedIn.value, 10);
+
+    state.targetSize = (!isNaN(size) && size >= 20 && size <= 200) ? size : 50;
+    state.speedMs    = (!isNaN(speed) && speed >= 200 && speed <= 5000) ? speed : 800;
+  }
+
+  /* ====== Controle de start/reset ====== */
+  function start() {
+    readInputs();
+    state.running = true;
+    state.score = 0; state.hits = 0; state.misses = 0;
+    state.reactionTimes = [];
+    updateHUD();
+    spawnTarget();
+    startBtn.textContent = 'PARAR TREINO';
+  }
+
+  function stop() {
+    state.running = false;
+    removeTarget();
+    startBtn.textContent = 'INICIAR TREINO';
+  }
+
+  function reset() {
+    stop();
+    state.score = 0; state.hits = 0; state.misses = 0;
+    state.reactionTimes = [];
+    updateHUD();
+  }
+
+  /* ====== Eventos ====== */
+  startBtn.addEventListener('click', () => state.running ? stop() : start());
+  resetBtn.addEventListener('click', reset);
+
+  // Se a janela redimensionar, reposiciona o alvo
+  window.addEventListener('resize', () => {
+    if (state.running) { removeTarget(); spawnTarget(); }
+  });
+})();
+</script>
+</body>
+</html>
